@@ -42,6 +42,8 @@ class ComparatorClassGenerator {
 
     protected final TypeElement objectTypeElement;
 
+    private final TypeElement collectionType;
+
     protected final Map<Tuple2<String, String>, MethodSpec> helpMethods = new HashMap<>();
 
     protected TypeSpec cache = null;
@@ -55,6 +57,7 @@ class ComparatorClassGenerator {
         this.typeUtils = processingEnv.getTypeUtils();
 
         this.objectTypeElement = elementUtils.getTypeElement("java.lang.Object");
+        this.collectionType = elementUtils.getTypeElement("java.util.Collection");
 
         classBuilder = TypeSpec.classBuilder(interfaze.getSimpleName().toString() + IMPLEMENTATION_SUFFIX)
                 .addModifiers(Modifier.PUBLIC, Modifier.FINAL)
@@ -106,7 +109,6 @@ class ComparatorClassGenerator {
         String currentName = var1.getSimpleName().toString();
 
         methodBuilder.addStatement("$T builder = $T.builder()", Diffs.Builder.class, Diffs.class);
-        TypeElement collectionType = elementUtils.getTypeElement("java.util.Collection");
         for (Tuple2<Element, ExecutableElement> property: allProperties) {
             TypeMirror propType = property._1.asType();
             String getterName = property._2.getSimpleName().toString();
@@ -127,15 +129,6 @@ class ComparatorClassGenerator {
             }
         }
         methodBuilder.addStatement("return builder.build()");
-        return methodBuilder.build();
-    }
-
-
-    private MethodSpec generateUnsupportedMethodSpec(TypeElement interfaze, ExecutableElement method) {
-        MethodSpec.Builder methodBuilder = newMethodBuilder(interfaze, method);
-
-        methodBuilder.addStatement("throw new UnsupportedOperationException()");
-
         return methodBuilder.build();
     }
 
@@ -184,7 +177,7 @@ class ComparatorClassGenerator {
 
     protected TypeMirror findRealType(TypeElement interfaze, ExecutableElement method, TypeVariable typeVariable) {
         if (interfaze.equals(method.getEnclosingElement())) {
-            throw new IllegalArgumentException("ExtensionPoint interface MUST NOT have any type variables");
+            throw new IllegalArgumentException("Comparator interface MUST NOT have any type variables");
         }
         return doFindRealType(interfaze.asType(), method, typeVariable);
     }

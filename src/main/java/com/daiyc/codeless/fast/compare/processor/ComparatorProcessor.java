@@ -43,7 +43,7 @@ public class ComparatorProcessor extends AbstractProcessor {
                 continue;
             }
 
-            processingEnv.getMessager().printMessage(Diagnostic.Kind.NOTE, "found @ExtensionPoint at " + element);
+            processingEnv.getMessager().printMessage(Diagnostic.Kind.NOTE, "found @Comparator at " + element);
             if (!processComparator(element)) {
                 return false;
             }
