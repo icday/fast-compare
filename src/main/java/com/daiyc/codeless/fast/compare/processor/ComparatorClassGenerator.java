@@ -5,9 +5,11 @@ import com.daiyc.codeless.fast.compare.Diffs;
 import com.daiyc.codeless.fast.compare.ValueDiff;
 import com.squareup.javapoet.ClassName;
 import com.squareup.javapoet.MethodSpec;
+import com.squareup.javapoet.TypeName;
 import com.squareup.javapoet.TypeSpec;
 import io.vavr.Tuple2;
 import io.vavr.collection.Stream;
+import lombok.RequiredArgsConstructor;
 
 import javax.annotation.processing.ProcessingEnvironment;
 import javax.lang.model.element.*;
@@ -18,9 +20,8 @@ import javax.lang.model.util.ElementFilter;
 import javax.lang.model.util.Elements;
 import javax.lang.model.util.Types;
 import javax.tools.Diagnostic;
-import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
@@ -40,11 +41,14 @@ class ComparatorClassGenerator {
 
     protected final Types typeUtils;
 
+    // region 各种需要的类型常量
     protected final TypeElement objectTypeElement;
 
     private final TypeElement collectionType;
 
-    protected final Map<Tuple2<String, String>, MethodSpec> helpMethods = new HashMap<>();
+    private final TypeElement diffsType;
+
+    // endregion
 
     protected TypeSpec cache = null;
 
@@ -58,6 +62,7 @@ class ComparatorClassGenerator {
 
         this.objectTypeElement = elementUtils.getTypeElement("java.lang.Object");
         this.collectionType = elementUtils.getTypeElement("java.util.Collection");
+        this.diffsType = elementUtils.getTypeElement("com.daiyc.codeless.fast.compare.Diffs");
 
         classBuilder = TypeSpec.classBuilder(interfaze.getSimpleName().toString() + IMPLEMENTATION_SUFFIX)
                 .addModifiers(Modifier.PUBLIC, Modifier.FINAL)
@@ -74,62 +79,114 @@ class ComparatorClassGenerator {
             return cache;
         }
 
-        Stream.ofAll(getAllInterfaceMethods())
-                .map(m -> this.generateMethodSpec(interfaze, m))
-                .forEach(classBuilder::addMethod);
+        synchronized (this) {
+            if (cache != null) {
+                return cache;
+            }
 
-        helpMethods.values()
-                .forEach(classBuilder::addMethod);
+            Stream.ofAll(getAllInterfaceMethods())
+                    .map(m -> this.generateMethodSpec(interfaze, m))
+                    .forEach(classBuilder::addMethod);
 
-        return cache = classBuilder.build();
+            return cache = classBuilder.build();
+        }
     }
 
-    private MethodSpec generateMethodSpec(TypeElement interfaze, ExecutableElement method) {
-        List<? extends VariableElement> parameters = method.getParameters();
-        if (parameters.size() != 2) {
+    private void validate(TypeElement interfaze, ExecutableElement method) {
+        if (method.getParameters().size() != 2) {
             throw new IllegalArgumentException("参数个数必须为2");
         }
-        MethodSpec.Builder methodBuilder = newMethodBuilder(interfaze, method);
 
-        VariableElement var0 = parameters.get(0);
-        VariableElement var1 = parameters.get(1);
-        TypeMirror type0 = var0.asType();
-        TypeMirror type1 = var1.asType();
+        TypeMirror type0 = method.getParameters().get(0).asType();
+        TypeMirror type1 = method.getParameters().get(1).asType();
         if (!typeUtils.isSameType(type0, type1)) {
             throw new IllegalArgumentException("参数的类型必须相同");
         }
-        // TODO skip 基础类型
 
-        DeclaredType declaredType = (DeclaredType) type0;
-        TypeElement typeElement = (TypeElement) typeUtils.asElement(type0);
-        ClassElementWrapper classElementWrapper = new ClassElementWrapper(elementUtils, typeUtils, typeElement);
-        List<Tuple2<Element, ExecutableElement>> allProperties = classElementWrapper.getAllProperties();
+        TypeMirror returnType = method.getReturnType();
+        if (!typeUtils.isSameType(returnType, diffsType.asType())) {
+            throw new IllegalArgumentException("返回值必须是 Diffs 类型");
+        }
 
-        String originalName = var0.getSimpleName().toString();
-        String currentName = var1.getSimpleName().toString();
+        TypeName type = ClassName.get(type0);
+        if (type.isPrimitive() || type.isBoxedPrimitive()) {
+            throw new IllegalArgumentException("基础类型不允许比较");
+        }
+    }
 
-        methodBuilder.addStatement("$T builder = $T.builder()", Diffs.Builder.class, Diffs.class);
-        for (Tuple2<Element, ExecutableElement> property: allProperties) {
-            TypeMirror propType = property._1.asType();
-            String getterName = property._2.getSimpleName().toString();
-            if (typeUtils.isAssignable(typeUtils.erasure(propType), typeUtils.erasure(collectionType.asType()))) {
-                methodBuilder.beginControlFlow("if (!$T.equals($L.$L(), $L.$L()))", Objects.class, originalName, getterName, currentName, getterName);
+    @RequiredArgsConstructor
+    class MethodGenerator {
+        private final ExecutableElement method;
+
+        private final ComparisonMeta comparisonMeta;
+
+        public MethodSpec generate() {
+            MethodSpec.Builder methodBuilder = newMethodBuilder(interfaze, method);
+
+            TypeElement typeElement = (TypeElement) typeUtils.asElement(comparisonMeta.getType());
+            ClassElementWrapper classElementWrapper = new ClassElementWrapper(elementUtils, typeUtils, typeElement);
+            List<Tuple2<Element, ExecutableElement>> allProperties = classElementWrapper.getAllProperties();
+
+            methodBuilder.addStatement("$T builder = $T.builder()", Diffs.Builder.class, Diffs.class);
+            for (Tuple2<Element, ExecutableElement> property : allProperties) {
+                Element prop = property._1;
+                String propName = prop.getSimpleName().toString();
+                String getterName = property._2.getSimpleName().toString();
+
+                if (comparisonMeta.shouldIgnore(propName)) {
+                    methodBuilder.addComment("ignore property: " + propName);
+                    continue;
+                }
+
+                addPropertyToBuilder(methodBuilder, prop.asType(), getterName, propName);
+            }
+            methodBuilder.addStatement("return builder.build()");
+            return methodBuilder.build();
+        }
+
+        private void addPropertyToBuilder(MethodSpec.Builder methodBuilder, TypeMirror propType, String getterName, String propertyName) {
+            String originalName = comparisonMeta.getOriginalName();
+            String currentName = comparisonMeta.getCurrentName();
+
+            LinkedList<Runnable> blocks = new LinkedList<>();
+            Runnable nestedBlock;
+            if (isCollectionType(propType)) {
                 DeclaredType collType = (DeclaredType) propType;
                 TypeMirror elementType = collType.getTypeArguments().get(0);
-                methodBuilder.addStatement("builder.add($S, new $T($T.class, $T.class, $L.$L(), $L.$L()))"
-                        , property._1.getSimpleName().toString()
-                        , CollectionDiff.class, typeUtils.erasure(collType), elementType, originalName, getterName, currentName, getterName);
-                methodBuilder.endControlFlow();
+                nestedBlock = () -> methodBuilder.addStatement("builder.add($S, new $T<>($T.class, $T.class, $L.$L(), $L.$L()))"
+                        , propertyName, CollectionDiff.class, typeUtils.erasure(propType), elementType, originalName, getterName, currentName, getterName);
             } else {
-                methodBuilder.beginControlFlow("if (!$T.equals($L.$L(), $L.$L()))", Objects.class, originalName, getterName, currentName, getterName);
-                methodBuilder.addStatement("builder.add($S, new $T<>($T.class, $L.$L(), $L.$L()))"
-                        , property._1.getSimpleName().toString()
-                        , ValueDiff.class, propType, originalName, getterName, currentName, getterName);
-                methodBuilder.endControlFlow();
+                nestedBlock = () -> methodBuilder.addStatement("builder.add($S, new $T<>($T.class, $L.$L(), $L.$L()))"
+                        , propertyName, ValueDiff.class, typeUtils.erasure(propType), originalName, getterName, currentName, getterName);
             }
+
+            blocks.add(() -> methodBuilder.beginControlFlow("if (!$T.equals($L.$L(), $L.$L()))"
+                    , Objects.class, originalName, getterName, currentName, getterName));
+            blocks.add(nestedBlock);
+            blocks.add(methodBuilder::endControlFlow);
+
+            if (comparisonMeta.shouldIgnoreOriginalNull(propertyName)) {
+                blocks.addFirst(() -> methodBuilder.beginControlFlow("if ($L.$L() != null)", originalName, getterName));
+                blocks.addLast(methodBuilder::endControlFlow);
+            }
+
+            if (comparisonMeta.shouldIgnoreCurrentNull(propertyName)) {
+                blocks.addFirst(() -> methodBuilder.beginControlFlow("if ($L.$L() != null)", currentName, getterName));
+                blocks.addLast(methodBuilder::endControlFlow);
+            }
+
+            blocks.forEach(Runnable::run);
         }
-        methodBuilder.addStatement("return builder.build()");
-        return methodBuilder.build();
+
+        private boolean isCollectionType(TypeMirror propType) {
+            return typeUtils.isAssignable(typeUtils.erasure(propType), typeUtils.erasure(collectionType.asType()));
+        }
+    }
+
+    private MethodSpec generateMethodSpec(TypeElement interfaze, ExecutableElement method) {
+        validate(interfaze, method);
+        ComparisonMeta comparisonMeta = AnnotationUtils.parseComparison(interfaze, method, elementUtils.getTypeElement("com.daiyc.codeless.fast.compare.annotations.Compares"));
+        return new MethodGenerator(method, comparisonMeta).generate();
     }
 
     protected MethodSpec.Builder newMethodBuilder(TypeElement interfaze, ExecutableElement method) {

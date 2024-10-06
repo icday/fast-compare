@@ -15,7 +15,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class CollectionDiff<T> implements Diff<Collection<T>> {
     @Getter
-    private final Class<? extends Collection<?>> collectionType;
+    private final Class<? extends Collection> collectionType;
 
     @Getter
     private final Class<T> elementType;

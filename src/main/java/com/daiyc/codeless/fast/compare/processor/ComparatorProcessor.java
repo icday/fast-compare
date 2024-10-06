@@ -27,7 +27,12 @@ public class ComparatorProcessor extends AbstractProcessor {
             String annName = annotation.getQualifiedName().toString();
             boolean ok = true;
             if (annName.equals(ComparatorConstants.COMPARATOR)) {
-                ok = handleComparator(annotation, roundEnv);
+                try {
+                    ok = handleComparator(annotation, roundEnv);
+                } catch (Throwable ex) {
+                    processingEnv.getMessager().printMessage(Diagnostic.Kind.ERROR, ex.getMessage());
+                    throw ex;
+                }
             }
 
             if (!ok) {
