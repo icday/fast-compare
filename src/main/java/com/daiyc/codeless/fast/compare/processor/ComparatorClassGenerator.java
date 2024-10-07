@@ -3,6 +3,9 @@ package com.daiyc.codeless.fast.compare.processor;
 import com.daiyc.codeless.fast.compare.CollectionDiff;
 import com.daiyc.codeless.fast.compare.Diffs;
 import com.daiyc.codeless.fast.compare.ValueDiff;
+import com.daiyc.codeless.fast.compare.annotations.Compared;
+import com.daiyc.codeless.fast.compare.annotations.ComparedList;
+import com.daiyc.codeless.fast.compare.annotations.NotCompared;
 import com.squareup.javapoet.ClassName;
 import com.squareup.javapoet.MethodSpec;
 import com.squareup.javapoet.TypeName;
@@ -20,6 +23,7 @@ import javax.lang.model.util.ElementFilter;
 import javax.lang.model.util.Elements;
 import javax.lang.model.util.Types;
 import javax.tools.Diagnostic;
+import java.util.Collection;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Objects;
@@ -60,9 +64,9 @@ class ComparatorClassGenerator {
         this.elementUtils = processingEnv.getElementUtils();
         this.typeUtils = processingEnv.getTypeUtils();
 
-        this.objectTypeElement = elementUtils.getTypeElement("java.lang.Object");
-        this.collectionType = elementUtils.getTypeElement("java.util.Collection");
-        this.diffsType = elementUtils.getTypeElement("com.daiyc.codeless.fast.compare.Diffs");
+        this.objectTypeElement = elementUtils.getTypeElement(Object.class.getCanonicalName());
+        this.collectionType = elementUtils.getTypeElement(Collection.class.getCanonicalName());
+        this.diffsType = elementUtils.getTypeElement(Diffs.class.getCanonicalName());
 
         classBuilder = TypeSpec.classBuilder(interfaze.getSimpleName().toString() + IMPLEMENTATION_SUFFIX)
                 .addModifiers(Modifier.PUBLIC, Modifier.FINAL)
@@ -185,7 +189,11 @@ class ComparatorClassGenerator {
 
     private MethodSpec generateMethodSpec(TypeElement interfaze, ExecutableElement method) {
         validate(interfaze, method);
-        ComparisonMeta comparisonMeta = AnnotationUtils.parseComparison(interfaze, method, elementUtils.getTypeElement("com.daiyc.codeless.fast.compare.annotations.Compares"));
+        ComparisonMeta comparisonMeta = AnnotationUtils.parseComparison(interfaze, method
+                , elementUtils.getTypeElement(ComparedList.class.getCanonicalName())
+                , elementUtils.getTypeElement(Compared.class.getCanonicalName())
+                , elementUtils.getTypeElement(NotCompared.class.getCanonicalName())
+        );
         return new MethodGenerator(method, comparisonMeta).generate();
     }
 

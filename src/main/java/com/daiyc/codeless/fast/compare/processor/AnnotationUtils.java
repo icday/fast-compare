@@ -1,12 +1,15 @@
 package com.daiyc.codeless.fast.compare.processor;
 
+import io.vavr.Tuple;
+import org.apache.commons.lang3.StringUtils;
+
 import javax.lang.model.element.*;
 import javax.lang.model.type.DeclaredType;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import static com.daiyc.codeless.fast.compare.processor.ComparisonMeta.GLOBAL_KEY;
 
 /**
  * @author daiyc
@@ -15,19 +18,23 @@ import java.util.stream.Collectors;
 @SuppressWarnings("unchecked")
 abstract class AnnotationUtils {
 
-    public static Map<String, AnnotationValue> getAnnotationValues(Element param, TypeElement annElement) {
-        AnnotationMirror annotationMirror = param.getAnnotationMirrors()
+    public static Map<String, AnnotationValue> getAnnotationValues(Element annotatedElement, TypeElement annElement) {
+        return findAllAnnotationValues(annotatedElement, annElement)
+                .stream()
+                .findFirst()
+                .orElseGet(() -> getDefaultValues(annElement));
+    }
+
+    public static List<Map<String, AnnotationValue>> findAllAnnotationValues(Element annotatedElement, TypeElement annElement) {
+        return annotatedElement.getAnnotationMirrors()
                 .stream()
                 .filter(ann -> ann.getAnnotationType().asElement().equals(annElement))
-                .findFirst()
-                .orElse(null);
-
-        return getAnnotationValues(annotationMirror, annElement);
+                .map(annotationMirror -> getAnnotationValues(annotationMirror, annElement))
+                .collect(Collectors.toList());
     }
 
     public static Map<String, AnnotationValue> getAnnotationValues(AnnotationMirror annotationMirror, TypeElement annElement) {
-        Map<String, AnnotationValue> defaultValues = new HashMap<>();
-        defaultValues = getDefaultValues(annElement);
+        Map<String, AnnotationValue> defaultValues = getDefaultValues(annElement);
 
         Map<String, AnnotationValue> annValues = new HashMap<>();
         if (annotationMirror != null) {
@@ -51,8 +58,47 @@ abstract class AnnotationUtils {
                 .collect(Collectors.toMap(el -> el.getSimpleName().toString(), ExecutableElement::getDefaultValue));
     }
 
-    public static ComparisonMeta parseComparison(TypeElement interfaze, ExecutableElement method, TypeElement annElement) {
-        Map<String, AnnotationValue> comparesAnnValues = getAnnotationValues(method, annElement);
+    public static Map<String, ComparisonMeta.ComparingMeta> parseComparisonMap(TypeElement interfaze, ExecutableElement method
+            , TypeElement comparingListAnn, TypeElement comparingAnn) {
+
+        return ((List<AnnotationValue>) getAnnotationValues(method, comparingListAnn)
+                .get("value")
+                .getValue())
+                .stream()
+                .map(AnnotationValue::getValue)
+                .map(v -> (AnnotationMirror) v)
+                .map(am -> getAnnotationValues(am, comparingAnn))
+                .flatMap(values -> {
+                    List<String> fields = readStrings(values.get("field"));
+                    ComparisonMeta.ComparingMeta comparingMeta = asComparingMeta(values);
+                    if (fields.isEmpty()) {
+                        return Stream.of(Tuple.of(GLOBAL_KEY, comparingMeta));
+                    }
+                    return fields.stream().map(field -> Tuple.of(field, comparingMeta));
+                })
+                .collect(Collectors.toMap(t -> t._1, t -> t._2, (a, b) -> a));
+    }
+
+    private static ComparisonMeta.ComparingMeta asComparingMeta(Map<String, AnnotationValue> comparesAnnValues) {
+        return new ComparisonMeta.ComparingMeta()
+                .setIgnoreOriginalNull((boolean) comparesAnnValues.get("ignoreOriginalNull").getValue())
+                .setIgnoreCurrentNull((boolean) comparesAnnValues.get("ignoreCurrentNull").getValue());
+    }
+
+    public static List<String> parseNotComparing(TypeElement interfaze, ExecutableElement method, TypeElement annElement) {
+        return findAllAnnotationValues(method, annElement)
+                .stream()
+                .flatMap(values -> readStrings(values.get("value")).stream())
+                .filter(StringUtils::isNotBlank)
+                .distinct()
+                .collect(Collectors.toList());
+    }
+
+    public static ComparisonMeta parseComparison(TypeElement interfaze, ExecutableElement method
+            , TypeElement comparingListAnn, TypeElement comparingAnn, TypeElement notComparingAnn) {
+        List<String> notComparingFields = parseNotComparing(interfaze, method, notComparingAnn);
+
+        Map<String, ComparisonMeta.ComparingMeta> comparingMap = parseComparisonMap(interfaze, method, comparingListAnn, comparingAnn);
 
         ComparisonMeta meta = new ComparisonMeta();
 
@@ -60,25 +106,11 @@ abstract class AnnotationUtils {
         meta.setType((DeclaredType) parameters.get(0).asType());
         meta.setOriginalParam(parameters.get(0));
         meta.setCurrentParam(parameters.get(1));
-        List<String> include = readStrings(comparesAnnValues.get("include"));
-        List<String> exclude = readStrings(comparesAnnValues.get("exclude"));
-        boolean ignoreOriginalNull = (boolean) comparesAnnValues.get("ignoreOriginalNull").getValue();
-        boolean ignoreCurrentNull = (boolean) comparesAnnValues.get("ignoreCurrentNull").getValue();
-
-        meta.setIncludeFields(include);
-        meta.setExcludeFields(exclude);
-        meta.setIgnoreOriginalNull(ignoreOriginalNull);
-        meta.setIgnoreCurrentNull(ignoreCurrentNull);
+        meta.setFieldComparingMeta(comparingMap);
+        meta.setExcludeFields(notComparingFields);
 
         return meta;
     }
-
-//    public static DeclaredType getEnumType(Map<String, AnnotationValue> annotationValueMap, String key) {
-//        return Optional.ofNullable(annotationValueMap.get(key))
-//                .map(v -> (DeclaredType) v.getValue())
-//                .filter(c -> !"com.daiyc.extension.core.enums.None".equals(c.toString()))
-//                .orElse(null);
-//    }
 
     protected static List<String> readStrings(AnnotationValue annotationValue) {
         List<AnnotationValue> value = (List<AnnotationValue>) annotationValue.getValue();

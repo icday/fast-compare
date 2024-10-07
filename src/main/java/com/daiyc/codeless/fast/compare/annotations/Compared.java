@@ -6,20 +6,14 @@ import java.lang.annotation.*;
  * @author daiyc
  * @since 2024/10/4
  */
-@Documented
-@Inherited
+@Repeatable(ComparedList.class)
 @Retention(RetentionPolicy.CLASS)
-@Target({ElementType.METHOD})
-public @interface Compares {
+@Target({ElementType.METHOD, ElementType.ANNOTATION_TYPE })
+public @interface Compared {
     /**
-     * 需要比较的字段
+     * 字段名，如果为空表示对所有字段。此时优先级最低
      */
-    String[] include() default {};
-
-    /**
-     * 忽略比较的字段
-     */
-    String[] exclude() default {};
+    String[] field() default {};
 
     /**
      * 忽略 original 的空属性
