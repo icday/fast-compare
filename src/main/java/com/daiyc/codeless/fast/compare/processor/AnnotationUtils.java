@@ -61,8 +61,13 @@ abstract class AnnotationUtils {
     public static Map<String, ComparisonMeta.ComparingMeta> parseComparisonMap(TypeElement interfaze, ExecutableElement method
             , TypeElement comparingListAnn, TypeElement comparingAnn) {
 
-        return ((List<AnnotationValue>) getAnnotationValues(method, comparingListAnn)
-                .get("value")
+        AnnotationValue value = getAnnotationValues(method, comparingListAnn)
+                .get("value");
+        if (value == null) {
+            return Collections.emptyMap();
+        }
+
+        return ((List<AnnotationValue>) value
                 .getValue())
                 .stream()
                 .map(AnnotationValue::getValue)
