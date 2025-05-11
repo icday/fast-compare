@@ -1,8 +1,10 @@
 package com.daiyc.codeless.fast.compare.processor;
 
 import com.daiyc.codeless.fast.compare.ComparatorConstants;
+import com.daiyc.codeless.fast.compare.generate.GenerateFacade;
 import com.google.auto.service.AutoService;
 import com.squareup.javapoet.JavaFile;
+import com.squareup.javapoet.TypeSpec;
 import lombok.SneakyThrows;
 
 import javax.annotation.processing.*;
@@ -73,9 +75,9 @@ public class ComparatorProcessor extends AbstractProcessor {
         Elements elementUtils = processingEnv.getElementUtils();
         String packageName = elementUtils.getPackageOf(interfaze).getQualifiedName().toString();
 
-        ComparatorClassGenerator comparatorClassGenerator = new ComparatorClassGenerator(processingEnv, interfaze);
+        TypeSpec typeSpec = GenerateFacade.generate(processingEnv, interfaze);
 
-        return JavaFile.builder(packageName, comparatorClassGenerator.generate())
+        return JavaFile.builder(packageName, typeSpec)
                 .build();
     }
 

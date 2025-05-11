@@ -1,4 +1,4 @@
-package com.daiyc.codeless.fast.compare.processor;
+package com.daiyc.codeless.fast.compare.generate;
 
 import io.vavr.Tuple;
 import org.apache.commons.lang3.StringUtils;
@@ -9,7 +9,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static com.daiyc.codeless.fast.compare.processor.ComparisonMeta.GLOBAL_KEY;
+import static com.daiyc.codeless.fast.compare.generate.ComparisonMeta.GLOBAL_KEY;
 
 /**
  * @author daiyc

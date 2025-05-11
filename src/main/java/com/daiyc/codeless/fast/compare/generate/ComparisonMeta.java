@@ -1,4 +1,4 @@
-package com.daiyc.codeless.fast.compare.processor;
+package com.daiyc.codeless.fast.compare.generate;
 
 import lombok.Data;
 import lombok.experimental.Accessors;
@@ -15,7 +15,7 @@ import java.util.Optional;
  */
 @Data
 @Accessors(chain = true)
-public class ComparisonMeta {
+class ComparisonMeta {
     public static final String GLOBAL_KEY = "";
 
     /**
